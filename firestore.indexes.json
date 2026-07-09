@@ -1,0 +1,78 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "eod",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "centreId", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "eod",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "divisionId", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "eod",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "regionId", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "eod",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "circleId", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "eod",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "divisionId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "eod",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "divisionId", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "eod",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "regionId", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "eod",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "circleId", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "centres",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "divisionId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

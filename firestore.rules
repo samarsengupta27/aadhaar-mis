@@ -1,0 +1,186 @@
+rules_version = '2';
+
+// ============================================================================
+// SECURITY MODEL — read this before editing anything below
+// ============================================================================
+//
+// This project has NO Cloud Functions (see README "Why no Cloud Functions").
+// That has two consequences for how these rules work, compared to a more
+// typical Firebase setup:
+//
+// 1. No custom claims. Role/scope (circleId/regionId/divisionId/centreId)
+//    live only in the users/{uid} Firestore doc — there is no Cloud
+//    Function to mirror them onto the Auth token. So instead of the cheap
+//    `request.auth.token.role` check, every rule below does a get() on
+//    the caller's own users/{uid} doc to find their role and scope.
+//
+// 2. No server-computed revenue. Revenue is calculated in the browser
+//    (see src/utils/constants.js computeRevenuePreview) rather than in a
+//    trusted Cloud Function, so these rules do NOT independently re-verify
+//    that revenue = counts x rate. They validate SHAPE (right fields,
+//    right types, non-negative numbers) and OWNERSHIP (you can only write
+//    your own centre's/division's data) — not the arithmetic. This is a
+//    deliberate, scoped tradeoff: this app's stated purpose is INTERNAL
+//    monitoring of revenue/performance, not an adversarial system where a
+//    counterparty profits by defeating it — cash collected is
+//    independently reconciled against PO deposit records regardless of
+//    what this dashboard shows. If this system's purpose ever changes to
+//    something where a user has a financial incentive to falsify figures
+//    against the department, this tradeoff should be revisited (most
+//    likely by reintroducing a trusted compute layer).
+//
+// ============================================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function myProfile() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function myRole() {
+      return isSignedIn() ? myProfile().role : null;
+    }
+
+    function isCO() { return myRole() == 'co'; }
+    function isRO() { return myRole() == 'ro'; }
+    function isDO() { return myRole() == 'do'; }
+    function isOperator() { return myRole() == 'operator'; }
+
+    function inMyCircle(data) {
+      return isCO() && data.circleId == myProfile().circleId;
+    }
+    function inMyRegion(data) {
+      return isRO() && data.regionId == myProfile().regionId;
+    }
+    function inMyDivision(data) {
+      return isDO() && data.divisionId == myProfile().divisionId;
+    }
+    function isMyCentre(data) {
+      return isOperator() && data.centreId == myProfile().centreId;
+    }
+
+    function canRead(data) {
+      return isSignedIn() && (
+        inMyCircle(data) || inMyRegion(data) || inMyDivision(data) || isMyCentre(data)
+      );
+    }
+
+    // Shape validation for an EoD counts object — the accuracy floor we
+    // CAN enforce without a trusted compute layer.
+    function validCounts(counts) {
+      return counts.newEnrolment is number && counts.newEnrolment >= 0 &&
+             counts.mandatoryUpdate is number && counts.mandatoryUpdate >= 0 &&
+             counts.demographicUpdate is number && counts.demographicUpdate >= 0 &&
+             counts.biometricUpdate is number && counts.biometricUpdate >= 0 &&
+             counts.mbu is number && counts.mbu >= 0;
+    }
+
+    // ---------- users ----------
+    match /users/{uid} {
+      allow read: if isSignedIn() && (
+        request.auth.uid == uid ||
+        isCO() ||
+        (isRO() && resource.data.regionId == myProfile().regionId) ||
+        (isDO() && resource.data.divisionId == myProfile().divisionId)
+      );
+
+      allow create: if isCO() ||
+        (isDO() && request.resource.data.role == 'operator' &&
+         request.resource.data.divisionId == myProfile().divisionId);
+
+      allow update: if isCO() ||
+        (isDO() && resource.data.divisionId == myProfile().divisionId && resource.data.role == 'operator') ||
+        (request.auth.uid == uid &&
+         request.resource.data.role == resource.data.role &&
+         request.resource.data.divisionId == resource.data.divisionId &&
+         request.resource.data.centreId == resource.data.centreId &&
+         request.resource.data.circleId == resource.data.circleId);
+
+      allow delete: if isCO();
+    }
+
+    // ---------- centres (master data, DO-managed) ----------
+    match /centres/{centreId} {
+      allow read: if canRead(resource.data);
+      allow create, update: if isCO() ||
+        (isDO() && request.resource.data.divisionId == myProfile().divisionId);
+      allow delete: if isCO();
+
+      match /operatorHistory/{entryId} {
+        allow read: if canRead(get(/databases/$(database)/documents/centres/$(centreId)).data);
+        allow create, update: if isCO() ||
+          (isDO() && get(/databases/$(database)/documents/centres/$(centreId)).data.divisionId == myProfile().divisionId);
+      }
+    }
+
+    // ---------- rate card ----------
+    match /rateCard/{docId} {
+      allow read: if isSignedIn();
+      allow write: if isCO();
+
+      match /history/{entryId} {
+        allow read: if isSignedIn();
+        allow write: if isCO();
+      }
+    }
+
+    // ---------- holidays ----------
+    match /holidays/{circleId} {
+      allow read: if isSignedIn();
+      allow write: if isCO();
+    }
+
+    // ---------- targets ----------
+    // Monthly target is just a cached computation (working days x daily
+    // rate) — not privileged data, so any signed-in user may write the
+    // cache for a centre they can see, not only co/do. This avoids every
+    // operator's performance page silently failing to cache and
+    // recomputing every visit.
+    match /targets/{targetId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
+    }
+
+    // ---------- EoD daily entries ----------
+    match /eod/{eodId} {
+      allow read: if canRead(resource.data);
+
+      allow create: if isMyCentre(request.resource.data) &&
+        request.resource.data.submittedByUid == request.auth.uid &&
+        request.resource.data.status == 'submitted' &&
+        validCounts(request.resource.data.counts);
+
+      allow update: if
+        (isMyCentre(resource.data) &&
+          request.resource.data.status == 'pending_approval' &&
+          request.resource.data.counts == resource.data.counts &&
+          request.resource.data.revenue == resource.data.revenue &&
+          validCounts(request.resource.data.pendingEdit.counts)) ||
+        (isDO() && resource.data.divisionId == myProfile().divisionId &&
+          (request.resource.data.status == 'approved' || request.resource.data.status == 'submitted'));
+
+      allow delete: if false;
+
+      match /auditLog/{entryId} {
+        allow read: if canRead(get(/databases/$(database)/documents/eod/$(eodId)).data);
+        allow create: if isSignedIn();
+        allow update, delete: if false;
+      }
+    }
+
+    // ---------- pre-aggregated rollups ----------
+    // NOTE: unused without Cloud Functions (no nightly aggregation job).
+    // MIS pages compute totals live from `eod` instead — see
+    // src/utils/rollups.js. Left in place only in case a future
+    // Cloud-Functions-based rollup job is reintroduced.
+    match /dailyRollups/{rollupId} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+  }
+}
